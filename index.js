@@ -30,10 +30,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-
-// Middleware para verificar el token JWT
-
-
 // 🔹 Endpoint para registrar usuario con contraseña hasheada
 app.post("/registro", async (req, res) => {
   const { email, username, password } = req.body;
@@ -108,6 +104,11 @@ app.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Credenciales incorrectas" });
     }
 
+    // Actualiza el campo `last_login` con la marca de tiempo del servidor
+    await db.collection("Users").doc(userDoc.id).update({
+      last_login: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
     const token = jwt.sign(
       { uid: userDoc.id, username: userData.username, role: userData.role },
       process.env.JWT_SECRET,
@@ -121,8 +122,10 @@ app.post("/login", async (req, res) => {
   }
 });
 
+
+
 const authenticateToken = (req, res, next) => {
-  const token = req.headers["authorization"]?.split(" ")[1]; // "Bearer <token>"
+  const token = req.headers["authorization"]?.split(" ")[1]; // Extraer el token después de "Bearer "
 
   if (!token) {
     return res.status(401).json({ message: "Token no proporcionado" });
@@ -130,24 +133,74 @@ const authenticateToken = (req, res, next) => {
 
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) {
-      // Verifica si el error es por token expirado
       if (err.name === "TokenExpiredError") {
-        console.log("Token expirado"); // Mensaje en consola cuando el token ha expirado
+        console.log("Token expirado");
       } else {
         console.log("Token inválido o error en la verificación");
       }
       return res.status(403).json({ message: "Token expirado o inválido" });
     }
 
-    req.user = decoded; // Agregar datos del usuario al objeto de la solicitud
+    console.log("Usuario autenticado:", decoded); // Verifica que el token contiene los datos esperados
+    req.user = decoded; // Asegura que req.user se está asignando correctamente
     next();
   });
 };
 
-
 // 🔹 Ruta protegida que requiere un token válido
 app.get("/protected", authenticateToken, (req, res) => {
   res.status(200).json({ message: "Acceso permitido", user: req.user });
+});
+
+app.post("/tasks", authenticateToken, async (req, res) => {
+  const { nameTask, category, description, deadline, status } = req.body;
+ 
+  if (!nameTask || !category || !description || !deadline || !status) {
+    return res.status(400).json({ message: "Todos los campos son obligatorios" });
+  }
+
+  try {
+    // Obtener el siguiente ID secuencial
+    const tasksSnapshot = await db.collection("Tasks").get();
+    const nextId = tasksSnapshot.size + 1;
+
+    // Crear el objeto de tarea
+    const taskData = {
+      nameTask,
+      category,
+      description,
+      deadline: new Date(deadline), // Convertir a fecha
+      status,
+      uid: req.user.uid,
+      create: admin.firestore.FieldValue.serverTimestamp(), // Timestamp automático
+
+    };
+
+    // Guardar la tarea en Firestore
+    const taskRef = db.collection("Tasks").doc(`${nextId}`);
+    await taskRef.set(taskData);
+    console.log("Tarea registrada correctamente");
+    res.status(200).json({ message: "Tarea registrada correctamente" });
+  } catch (error) {
+    console.error("Error al registrar la tarea:", error);
+    res.status(500).json({ message: "Error al registrar tarea", error: error.message });
+  }
+});
+app.get("/obtener-tasks", authenticateToken, async (req, res) => {
+  try {
+    const { uid } = req.user; // Obtiene el UID del usuario autenticado
+    const tasksSnapshot = await db.collection("Tasks").where("uid", "==", uid).get();
+
+    const tasks = tasksSnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.status(200).json(tasks);
+  } catch (error) {
+    console.error("Error al obtener tareas:", error);
+    res.status(500).json({ message: "Error al obtener tareas", error: error.message });
+  }
 });
 
 
