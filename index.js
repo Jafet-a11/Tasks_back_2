@@ -9,14 +9,27 @@ const bcrypt = require("bcrypt"); // Importar bcrypt para el hash de contraseña
 const app = express();
 const port = 5000;
 
-// Inicializar Firebase Admin con credenciales
-const serviceAccount = require("./Credenciales.json");
+const serviceAccount = {
+  type: process.env.TYPE,
+  project_id: process.env.PROJECT_ID,
+  private_key_id: process.env.PRIVATE_KEY_ID,
+  private_key: process.env.PRIVATE_KEY.replace(/\\n/g, '\n'),
+  client_email: process.env.CLIENT_EMAIL,
+  client_id: process.env.CLIENT_ID,
+  auth_uri: process.env.AUTH_URI,
+  token_uri: process.env.TOKEN_URI,
+  auth_provider_x509_cert_url: process.env.AUTH_PROVIDER_X509_CERT_URL,
+  client_x509_cert_url:  process.env.CLIENT_X509_CERT_URL,
+  universe_domain: process.env.UNIVERSE_DOMAIN,
+};
 
 if (!admin.apps.length) {
   try {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
+      
     });
+    console.log("🔥 Firebase inicializado correctamente");
   } catch (error) {
     console.error("Error al inicializar Firebase Admin:", error);
   }
@@ -110,12 +123,12 @@ app.post("/login", async (req, res) => {
     });
 
     const token = jwt.sign(
-      { uid: userDoc.id, username: userData.username, role: userData.role, group_id:userData.group_id },
+      { uid: userDoc.id, username: userData.username, role: userData.role, group_id: userData.group_id },
       process.env.JWT_SECRET,
       { expiresIn: "10m" }
     );
-
-    res.status(200).json({ message: "Inicio de sesión exitoso", token , userData});
+    console.log(token);
+    res.status(200).json({ message: "Inicio de sesión exitoso", token, userData });
     console.log("Token: ", token);
   } catch (error) {
     res.status(500).json({ message: "Error al iniciar sesión", error: error.message });
@@ -154,7 +167,7 @@ app.get("/protected", authenticateToken, (req, res) => {
 
 app.post("/tasks", authenticateToken, async (req, res) => {
   const { nameTask, category, description, deadline, status } = req.body;
- 
+
   if (!nameTask || !category || !description || !deadline || !status) {
     return res.status(400).json({ message: "Todos los campos son obligatorios" });
   }
@@ -188,9 +201,9 @@ app.post("/tasks", authenticateToken, async (req, res) => {
 });
 
 app.post("/tasksGroup", authenticateToken, async (req, res) => {
-  const { nameTask, category, description, deadline, status, assignedUser, username } = req.body;
+  const { nameTask, category, description, deadline, status, assignedUser, username, group } = req.body;
 
-  if (!nameTask || !category || !description || !deadline || !status || !assignedUser || !username) {
+  if (!nameTask || !category || !description || !deadline || !status || !assignedUser || !username || !group) {
     return res.status(400).json({ message: "Todos los campos son obligatorios" });
   }
 
@@ -198,34 +211,6 @@ app.post("/tasksGroup", authenticateToken, async (req, res) => {
     // Obtener el siguiente ID secuencial
     const tasksSnapshot = await db.collection("Tasks").get();
     const nextId = tasksSnapshot.size + 1;
-
-    // Consultar datos del usuario asignado
-    const userRef = db.collection("Users").doc(`${assignedUser}`);
-    const userDoc = await userRef.get();
-
-    let assignedUsername = null;
-    let group_id = null;
-    let group_name = null; // Nombre del grupo
-
-    if (userDoc.exists) {
-      const userData = userDoc.data();
-      assignedUsername = userData.username; // Obtener el username del usuario asignado
-
-      if (userData.group_id) {
-        group_id = userData.group_id;
-
-        // Consultar el nombre del grupo en la colección "Groups"
-        const groupRef = db.collection("Groups").doc(`${group_id}`);
-        const groupDoc = await groupRef.get();
-
-        if (groupDoc.exists) {
-          group_name = groupDoc.data().name; // Obtener el nombre del grupo
-        }
-      }
-    } else {
-      return res.status(404).json({ message: "Usuario asignado no encontrado" });
-    }
-
     // Crear el objeto de tarea
     const taskData = {
       nameTask,
@@ -235,10 +220,9 @@ app.post("/tasksGroup", authenticateToken, async (req, res) => {
       status,
       uid: req.user.uid,
       create: admin.firestore.FieldValue.serverTimestamp(), // Timestamp automático
-      assignedUser, // ID del usuario asignado
-      assignedUsername, // Username del usuario asignado
+      assignedUser,
       assigned_by: username, // Username de quien asigna la tarea
-      group_id, // ID del grupo si lo tiene
+      group_id: group, // ID del grupo si lo tiene
     };
 
     // Guardar la tarea en Firestore
@@ -279,27 +263,28 @@ app.get("/obtener-tasks", authenticateToken, async (req, res) => {
 
 
 
-app.get("/obtener-tasks-group", authenticateToken, async (req, res) => {
+app.get("/obtener-tasks-group/:groupId", authenticateToken, async (req, res) => {
   try {
-    console.log(req.user); // Verifica que req.user tenga el group_id
-    const { group_id } = req.user; // Obtiene el group_id del usuario autenticado
-    if (!group_id) {
-      return res.status(400).json({ message: "No se encontró el group_id del usuario" });
+    const { groupId } = req.params;
+    const parsedGroupId = isNaN(groupId) ? groupId : Number(groupId); 
+
+    console.log(groupId);
+    if (!groupId) {
+      return res.status(400).json({ message: "No se proporcionó un groupId válido" });
     }
 
-    const tasksSnapshot = await db.collection("Tasks").where("group_id", "==", group_id).get();
-
+    const tasksSnapshot = await db.collection("Tasks").where("group_id", "==", parsedGroupId).get();
     const tasks = tasksSnapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
-
     res.status(200).json(tasks);
   } catch (error) {
     console.error("Error al obtener tareas:", error);
     res.status(500).json({ message: "Error al obtener tareas", error: error.message });
   }
 });
+
 
 
 
@@ -341,45 +326,6 @@ app.post("/editarTarea", authenticateToken, async (req, res) => {
   }
 });
 
-app.post("/editarTareaGroup", authenticateToken, async (req, res) => {
-  const { id, nameTask, category, description, deadline, status, assignedUser } = req.body;  // Agregar el usuario asignado
-
-
-  if (!id || !nameTask || !category || !description || !deadline || !status || !assignedUser) {
-    return res.status(400).json({ message: "Todos los campos son obligatorios" });
-  }
-
-  try {
-    // Verificar si la tarea existe
-    const taskRef = db.collection("Tasks").doc(id);
-    const taskDoc = await taskRef.get();
-
-    if (!taskDoc.exists) {
-      return res.status(404).json({ message: "Tarea no encontrada" });
-    }
-
-    // Convertir deadline a un objeto Date (si es necesario)
-    const parsedDeadline = deadline ? admin.firestore.Timestamp.fromDate(new Date(deadline)) : null; // Convierte la fecha a un objeto Date
-
-    // Crear el objeto de actualización
-    const taskData = {
-      nameTask,
-      category,
-      description,
-      deadline: parsedDeadline,   // Usamos la fecha convertida aquí
-      status,
-      assignedUser,
-    };
-
-    // Actualizar la tarea en Firestore
-    await taskRef.update(taskData);
-    console.log("Tarea actualizada correctamente");
-    res.status(200).json({ message: "Tarea actualizada correctamente" });
-  } catch (error) {
-    console.error("Error al actualizar la tarea:", error);
-    res.status(500).json({ message: "Error al actualizar tarea", error: error.message });
-  }
-});
 
 app.delete("/eliminar-task/:id", authenticateToken, async (req, res) => {
   try {
@@ -408,8 +354,8 @@ app.delete("/eliminar-task/:id", authenticateToken, async (req, res) => {
 
 app.post("/crear-grupo", authenticateToken, async (req, res) => {
   try {
-    const { username, role, uid } = req.user; // Aseguramos que el ID de usuario se obtenga correctamente
-    const { nameGroup, members } = req.body; // Lista de IDs de usuarios
+    const { username, role, uid } = req.user;
+    const { nameGroup, members } = req.body;
 
     console.log("ID del usuario autenticado:", uid);
     console.log("Usuarios a agregar al grupo:", members);
@@ -436,43 +382,36 @@ app.post("/crear-grupo", authenticateToken, async (req, res) => {
       transaction.set(metaRef, { lastGroupId: newGroupId }, { merge: true });
     });
 
+    const membersWithUsernames = [];
+    if (members && Array.isArray(members)) {
+      for (const userId of members) {
+        const userRef = db.collection("Users").doc(userId);
+        const userDoc = await userRef.get();
+        if (userDoc.exists) {
+          membersWithUsernames.push(userDoc.data().username);
+        }
+      }
+    }
+
     const newGroup = {
       id: newGroupId,
       created_by: username,
       nameGroup,
       created_at: new Date().toISOString(),
+      members: membersWithUsernames
     };
 
     await db.collection("Groups").doc(newGroupId.toString()).set(newGroup);
     console.log("Grupo creado con ID:", newGroupId);
 
-    if (members && Array.isArray(members) && members.length > 0) {
-      const batch = db.batch();
-
-      for (const userId of members) {
-        const userRef = db.collection("Users").doc(userId);
-        const userDoc = await userRef.get();
-
-        if (userDoc.exists) {
-          console.log(`Actualizando usuario ${userId} con grupo ${newGroupId}`);
-          batch.update(userRef, { group_id: newGroupId, group_name: nameGroup });
-        } else {
-          console.log(`Usuario con ID ${userId} no encontrado en la base de datos.`);
-        }
-      }
-
-      await batch.commit();
-      console.log("Usuarios actualizados correctamente.");
-    } else {
-      console.log("No se enviaron usuarios válidos para actualizar.");
-    }
-
-    res.status(201).json({ message: "Grupo creado y usuarios actualizados", group: newGroup });
+    res.status(201).json({ message: "Grupo creado correctamente", group: newGroup });
   } catch (error) {
     console.error("Error al crear grupo:", error);
     res.status(500).json({ message: "Error al crear grupo", error: error.message });
   }
 });
+
+
 
 
 
@@ -508,7 +447,7 @@ app.get("/obtener-usuarios", async (req, res) => {
   }
 });
 
-app.post("/updateTaskStatus/:taskId",authenticateToken, async (req, res) => {
+app.post("/updateTaskStatus/:taskId", authenticateToken, async (req, res) => {
   try {
     const { taskId } = req.params;
     const { status } = req.body;
@@ -519,10 +458,91 @@ app.post("/updateTaskStatus/:taskId",authenticateToken, async (req, res) => {
 
     const taskRef = db.collection("Tasks").doc(taskId);
     await taskRef.update({ status });
-    console.log("Tarea actualizacion:" , "id: ", taskId , "Estatus: ", status);
+    console.log("Tarea actualizacion:", "id: ", taskId, "Estatus: ", status);
     res.status(200).json({ message: "Estado actualizado con éxito." });
   } catch (error) {
     res.status(500).json({ error: "Error al actualizar el estado.", details: error.message });
+  }
+});
+
+app.delete("/eliminar-usuario/:id", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { uid } = req.user;
+    const userRef = db.collection("Users").doc(id);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+      return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+
+    await userRef.delete();
+    return res.status(200).json({ message: "Usuario eliminado correctamente" });
+
+  } catch (error) {
+    console.error("Error al eliminar el usuario:", error);
+    res.status(500).json({ message: "Error al eliminar el usuario", error: error.message });
+  }
+});
+
+app.post('/actualizar-usuario/:id', async (req, res) => {
+  const { id } = req.params;  // Obtener el ID de la URL
+  const { username, role, email } = req.body;  // Obtener los datos del cuerpo de la solicitud
+  try {
+    const userRef = db.collection('Users').doc(id);
+    // Obtener el documento
+    const userDoc = await userRef.get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ message: "Usuario no encontrado" });
+    }
+    await userRef.update({
+      username,
+      role,
+      email,
+    });
+
+    return res.status(200).json({ message: "Usuario actualizado correctamente" });
+  } catch (error) {
+    return res.status(500).json({ message: "Error al actualizar el usuario", error });
+  }
+});
+
+app.delete("/eliminar-grupos/:id", authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { uid } = req.user;
+    const groupRef = db.collection("Groups").doc(id);
+    const groupDoc = await groupRef.get();
+
+    if (!groupDoc.exists) {
+      return res.status(404).json({ message: "Grupo no encontrado" });
+    }
+
+    await groupRef.delete();
+    return res.status(200).json({ message: "Grupo eliminado correctamente" });
+
+  } catch (error) {
+    console.error("Error al eliminar el grupo:", error);
+    res.status(500).json({ message: "Error al eliminar el grupo", error: error.message });
+  }
+});
+app.post('/actualizar-grupo/:id', async (req, res) => {
+  const { id } = req.params;  // Obtener el ID de la URL
+  const { nameGroup } = req.body;  // Obtener los datos del cuerpo de la solicitud
+  try {
+    const groupRef = db.collection('Groups').doc(id);
+    // Obtener el documento
+    const groupDoc = await groupRef.get();
+    if (!groupDoc.exists) {
+      return res.status(404).json({ message: "Grupo no encontrado" });
+    }
+    await groupRef.update({
+      nameGroup,
+    });
+
+    return res.status(200).json({ message: "Grupo actualizado correctamente" });
+  } catch (error) {
+    return res.status(500).json({ message: "Error al actualizar el Grupo", error });
   }
 });
 
