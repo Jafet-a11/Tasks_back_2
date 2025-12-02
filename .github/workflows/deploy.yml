@@ -21,8 +21,6 @@ jobs:
 
       # 2. Construir la imagen de Docker (Backend)
       - name: Construir imagen de Docker
-        # Asegúrate de poner la ruta correcta si tu Dockerfile está en una subcarpeta
-        # Ejemplo: context: ./Tasks_back_2
         run: docker build -t ${{ secrets.DOCKER_USERNAME }}/tasks-back:v1 .
 
       # 3. Levantar el contenedor temporalmente para probarlo
