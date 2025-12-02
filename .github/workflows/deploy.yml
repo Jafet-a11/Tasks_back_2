@@ -1,0 +1,77 @@
+name: CI/CD - Test, Build & Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  # TRABAJO 1: INTEGRACIÓN CONTINUA (Build & Test)
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      # 1. Login en Docker Hub para poder subir la imagen después
+      - name: Login en Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 2. Construir la imagen de Docker (Backend)
+      - name: Construir imagen de Docker
+        # Asegúrate de poner la ruta correcta si tu Dockerfile está en una subcarpeta
+        # Ejemplo: context: ./Tasks_back_2
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/tasks-back:v1 .
+
+      # 3. Levantar el contenedor temporalmente para probarlo
+      - name: Iniciar contenedor para pruebas
+        run: |
+          docker run -d -p 8080:8080 --name test-backend ${{ secrets.DOCKER_USERNAME }}/tasks-back:v1
+          # Esperamos 10 segundos para asegurar que el servidor inicie bien
+          sleep 10
+
+      # 4. EJECUTAR SUPERTEST
+      # Esto instala las dependencias de prueba y corre el test contra el contenedor vivo
+      - name: Ejecutar Pruebas de Integración (Supertest)
+        run: |
+          # Asegúrate de estar en la carpeta donde está el package.json
+          npm install 
+          npm test
+        env:
+          # Si tu api.test.js usa variables de entorno, defínelas aquí
+          PORT: 8080
+
+      # 5. Si los tests pasan, subimos la imagen a Docker Hub
+      - name: Subir imagen a Docker Hub
+        if: success() # Solo se ejecuta si los pasos anteriores funcionaron
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/tasks-back:v1
+
+  # TRABAJO 2: DESPLIEGUE CONTINUO (Deploy en VPS)
+  deploy-to-vps:
+    needs: build-and-test 
+    runs-on: ubuntu-latest
+    steps:
+      - name: Desplegar en VPS vía SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            # 1. Ir a la carpeta del proyecto
+            cd /deployer/practica
+
+            # 2. Descargar la última versión de la imagen que acabamos de subir
+            echo "Descargando nueva imagen..."
+            docker compose pull backend
+
+            # 3. Recrear el contenedor (Docker detecta el cambio y lo actualiza)
+            # Esto sustituye tu script manual. Docker Compose se encarga de todo.
+            echo "Reiniciando servicios..."
+            docker compose up -d backend
+
+            # 4. Limpiar imágenes viejas para no llenar el disco (Opcional pero recomendado)
+            docker image prune -f

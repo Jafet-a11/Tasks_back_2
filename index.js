@@ -1,4 +1,3 @@
-// Jafet Uribe Ramirez
 require('dotenv').config();
 const express = require("express");
 const admin = require("firebase-admin");
@@ -7,7 +6,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt"); // Importar bcrypt para el hash de contraseñas
 
 const app = express();
-const port = 5000;
+const port = 8080;
 
 const serviceAccount = {
   type: process.env.TYPE,
@@ -546,6 +545,10 @@ app.post('/actualizar-grupo/:id', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+if (require.main === module) {
+    app.listen(port, () => {
+        console.log(`🚀 Servidor corriendo en el puerto ${port}`);
+    });
+}
+// Exportamos la app para que Supertest pueda usarla
+module.exports = app;

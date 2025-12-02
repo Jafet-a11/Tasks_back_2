@@ -1,0 +1,19 @@
+# USAMOS NODE.JS
+FROM node:18-alpine
+
+# CREAMOS LA CARPETA DE LA APP
+WORKDIR /app
+
+# COPIAMOS LOS ARCHIVOS DE INSTALACIÓN
+COPY package*.json ./
+
+# INSTALAMOS LAS LIBRERÍAS
+RUN npm install
+
+
+COPY . .
+
+EXPOSE 8080
+
+# COMANDO PARA INICIAR
+CMD ["node", "index.js"]
