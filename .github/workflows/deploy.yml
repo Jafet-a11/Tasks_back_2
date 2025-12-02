@@ -34,13 +34,19 @@ jobs:
 
       # 4. EJECUTAR SUPERTEST
       # Esto instala las dependencias de prueba y corre el test contra el contenedor vivo
+     # 4. EJECUTAR SUPERTEST
       - name: Ejecutar Pruebas de Integración (Supertest)
         run: |
-          # Asegúrate de estar en la carpeta donde está el package.json
-          npm install 
-          npm test
+          # 1. Borrar node_modules si existe (por si se bajó del repo)
+          rm -rf node_modules
+          
+          # 2. Instalación limpia (npm ci es más estricto y seguro para CI/CD)
+          npm install
+          
+          # 3. Ejecutar el test usando 'npx' para asegurar que encuentre el ejecutable
+          npx jest
         env:
-          # Si tu api.test.js usa variables de entorno, defínelas aquí
+          CI: true
           PORT: 8080
 
       # 5. Si los tests pasan, subimos la imagen a Docker Hub
