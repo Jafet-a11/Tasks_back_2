@@ -68,7 +68,7 @@ jobs:
           port: 22
           script: |
             # 1. Ir a la carpeta del proyecto
-            cd /deployer/practica
+            cd /deployer/scripts
 
             # 2. Descargar la última versión de la imagen que acabamos de subir
             echo "Descargando nueva imagen..."
